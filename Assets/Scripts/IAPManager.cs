@@ -1,30 +1,27 @@
 using System;
 using UnityEngine;
+
+// 导入Unity IAP包后，把下面这行注释取消
+// #define IAP_ENABLED
+
+#if IAP_ENABLED
 using UnityEngine.Purchasing;
 using UnityEngine.Purchasing.Extension;
+#endif
 
 /// <summary>
 /// 内购管理器 - Unity IAP封装
-/// 商品设计（欧美中休最优变现组合）：
-/// 
-/// 消耗型（Consumable）：
-///   coins_small  - $0.99  - 100金币（新手入门）
-///   coins_medium - $2.99  - 350金币（最佳性价比，标"HOT"）
-///   coins_large  - $6.99  - 900金币（大R首选）
-///   extra_time   - $0.99  - +30秒×3次（功能型，高转化）
-/// 
-/// 非消耗型（NonConsumable）：
-///   no_ads       - $1.99  - 永久去广告（转化率最高）
-///   vip_pack     - $4.99  - VIP礼包（去广告+500金币+专属皮肤）
-/// 
-/// 订阅型（Subscription）：
-///   weekly_vip   - $1.99/周 - 每周VIP（双倍金币+去广告）
+/// 未安装IAP包时自动模拟（编辑器正常运行）
 /// </summary>
-public class IAPManager : MonoBehaviour, IDetailedStoreListener
+public class IAPManager :
+#if IAP_ENABLED
+    MonoBehaviour, IDetailedStoreListener
+#else
+    MonoBehaviour
+#endif
 {
     public static IAPManager Instance;
 
-    // 商品ID（需与Google Play Console / App Store Connect一致）
     public const string COINS_SMALL  = "com.yourgame.coins_small";
     public const string COINS_MEDIUM = "com.yourgame.coins_medium";
     public const string COINS_LARGE  = "com.yourgame.coins_large";
@@ -33,18 +30,16 @@ public class IAPManager : MonoBehaviour, IDetailedStoreListener
     public const string VIP_PACK     = "com.yourgame.vip_pack";
     public const string WEEKLY_VIP   = "com.yourgame.weekly_vip";
 
-    // 金币数量配置
     private const int COINS_SMALL_AMOUNT  = 100;
     private const int COINS_MEDIUM_AMOUNT = 350;
     private const int COINS_LARGE_AMOUNT  = 900;
-    private const int EXTRA_TIME_USES     = 3;
-    private const int VIP_PACK_COINS      = 500;
 
+#if IAP_ENABLED
     private IStoreController storeController;
     private IExtensionProvider extensions;
     private bool isInitialized = false;
+#endif
 
-    // 购买回调
     private Action onPurchaseSuccess;
     private Action onPurchaseFailed;
 
@@ -54,64 +49,54 @@ public class IAPManager : MonoBehaviour, IDetailedStoreListener
         else { Destroy(gameObject); return; }
     }
 
-    void Start() => InitIAP();
+    void Start()
+    {
+#if IAP_ENABLED
+        InitIAP();
+#else
+        Debug.Log("[IAP] 模拟模式运行（Unity IAP未安装）");
+#endif
+    }
 
-    // ─────────────────────────────────────────
-    // 初始化
-    // ─────────────────────────────────────────
-
+#if IAP_ENABLED
     void InitIAP()
     {
         var builder = ConfigurationBuilder.Instance(StandardPurchasingModule.Instance());
-
-        // 消耗型商品
         builder.AddProduct(COINS_SMALL,  ProductType.Consumable);
         builder.AddProduct(COINS_MEDIUM, ProductType.Consumable);
         builder.AddProduct(COINS_LARGE,  ProductType.Consumable);
         builder.AddProduct(EXTRA_TIME,   ProductType.Consumable);
-
-        // 非消耗型商品
-        builder.AddProduct(NO_ADS,    ProductType.NonConsumable);
-        builder.AddProduct(VIP_PACK,  ProductType.NonConsumable);
-
-        // 订阅型商品
-        builder.AddProduct(WEEKLY_VIP, ProductType.Subscription);
-
+        builder.AddProduct(NO_ADS,       ProductType.NonConsumable);
+        builder.AddProduct(VIP_PACK,     ProductType.NonConsumable);
+        builder.AddProduct(WEEKLY_VIP,   ProductType.Subscription);
         UnityPurchasing.Initialize(this, builder);
-        Debug.Log("[IAP] 初始化中...");
     }
+#endif
 
     // ─────────────────────────────────────────
     // 购买接口
     // ─────────────────────────────────────────
 
-    /// <summary>购买指定商品</summary>
     public void BuyProduct(string productId, Action onSuccess = null, Action onFail = null)
     {
         onPurchaseSuccess = onSuccess;
         onPurchaseFailed  = onFail;
 
-        if (!isInitialized)
-        {
-            Debug.LogWarning("[IAP] 尚未初始化");
-            onFail?.Invoke();
-            return;
-        }
-
+#if IAP_ENABLED
+        if (!isInitialized) { onFail?.Invoke(); return; }
         var product = storeController.products.WithID(productId);
         if (product != null && product.availableToPurchase)
-        {
-            Debug.Log($"[IAP] 购买: {productId} | 价格: {product.metadata.localizedPriceString}");
             storeController.InitiatePurchase(product);
-        }
         else
-        {
-            Debug.LogWarning("[IAP] 商品不可购买: " + productId);
             onFail?.Invoke();
-        }
+#else
+        // 模拟模式：直接模拟购买成功（方便测试流程）
+        Debug.Log("[IAP] 模拟购买: " + productId);
+        ProcessReward(productId);
+        onSuccess?.Invoke();
+#endif
     }
 
-    /// <summary>快捷购买方法</summary>
     public void BuyNoAds()       => BuyProduct(NO_ADS);
     public void BuyVipPack()     => BuyProduct(VIP_PACK);
     public void BuyWeeklyVip()   => BuyProduct(WEEKLY_VIP);
@@ -120,156 +105,104 @@ public class IAPManager : MonoBehaviour, IDetailedStoreListener
     public void BuyCoinsLarge()  => BuyProduct(COINS_LARGE);
     public void BuyExtraTime()   => BuyProduct(EXTRA_TIME);
 
-    /// <summary>恢复购买（iOS必须实现）</summary>
     public void RestorePurchases()
     {
-        if (!isInitialized) return;
-#if UNITY_IOS
-        var apple = extensions.GetExtension<IAppleExtensions>();
-        apple.RestoreTransactions(result =>
+#if IAP_ENABLED && UNITY_IOS
+        extensions?.GetExtension<IAppleExtensions>()
+            .RestoreTransactions(r => Debug.Log("[IAP] 恢复: " + r));
+#endif
+    }
+
+    public bool IsNoAdsPurchased() => SaveManager.LoadInt("NoAds", 0) == 1;
+    public bool IsVipActive()      => SaveManager.LoadInt("WeeklyVIP", 0) == 1;
+
+    public string GetPrice(string productId)
+    {
+#if IAP_ENABLED
+        if (!isInitialized) return "--";
+        return storeController.products.WithID(productId)?.metadata.localizedPriceString ?? "--";
+#else
+        // 模拟价格
+        switch (productId)
         {
-            Debug.Log("[IAP] 恢复购买: " + (result ? "成功" : "失败"));
-        });
+            case NO_ADS:       return "$1.99";
+            case VIP_PACK:     return "$4.99";
+            case WEEKLY_VIP:   return "$1.99/wk";
+            case COINS_SMALL:  return "$0.99";
+            case COINS_MEDIUM: return "$2.99";
+            case COINS_LARGE:  return "$6.99";
+            case EXTRA_TIME:   return "$0.99";
+            default:           return "--";
+        }
 #endif
     }
 
     // ─────────────────────────────────────────
-    // 状态查询
+    // 奖励发放（有无SDK都走这里）
     // ─────────────────────────────────────────
 
-    public bool IsNoAdsPurchased()
+    void ProcessReward(string id)
     {
-        if (!isInitialized) return SaveManager.LoadInt("NoAds", 0) == 1;
-        var p = storeController.products.WithID(NO_ADS);
-        return p != null && p.hasReceipt;
-    }
-
-    public bool IsVipActive()
-    {
-        if (!isInitialized) return false;
-        var p = storeController.products.WithID(WEEKLY_VIP);
-        if (p == null || !p.hasReceipt) return false;
-        var info = new SubscriptionManager(p, null);
-        return info.getSubscriptionInfo().isSubscribed() == Result.True;
-    }
-
-    public string GetPrice(string productId)
-    {
-        if (!isInitialized) return "--";
-        var p = storeController.products.WithID(productId);
-        return p?.metadata.localizedPriceString ?? "--";
-    }
-
-    // ─────────────────────────────────────────
-    // IDetailedStoreListener 实现
-    // ─────────────────────────────────────────
-
-    public void OnInitialized(IStoreController controller, IExtensionProvider ext)
-    {
-        storeController = controller;
-        extensions = ext;
-        isInitialized = true;
-        Debug.Log("[IAP] ✅ 初始化成功，商品数: " + controller.products.all.Length);
-
-        // 恢复非消耗型商品状态
-        RestoreNonConsumables();
-    }
-
-    public void OnInitializeFailed(InitializationFailureReason reason)
-    {
-        Debug.LogWarning("[IAP] ❌ 初始化失败: " + reason);
-    }
-
-    public void OnInitializeFailed(InitializationFailureReason reason, string message)
-    {
-        Debug.LogWarning($"[IAP] ❌ 初始化失败: {reason} | {message}");
-    }
-
-    public PurchaseProcessingResult ProcessPurchase(PurchaseEventArgs args)
-    {
-        string id = args.purchasedProduct.definition.id;
-        Debug.Log("[IAP] ✅ 购买成功: " + id);
-
         switch (id)
         {
-            case COINS_SMALL:
-                CoinManager.Instance?.AddCoins(COINS_SMALL_AMOUNT);
-                ShowReward($"+{COINS_SMALL_AMOUNT} 金币！");
-                break;
-
-            case COINS_MEDIUM:
-                CoinManager.Instance?.AddCoins(COINS_MEDIUM_AMOUNT);
-                ShowReward($"+{COINS_MEDIUM_AMOUNT} 金币！");
-                break;
-
-            case COINS_LARGE:
-                CoinManager.Instance?.AddCoins(COINS_LARGE_AMOUNT);
-                ShowReward($"+{COINS_LARGE_AMOUNT} 金币！");
-                break;
-
+            case COINS_SMALL:  CoinManager.Instance?.AddCoins(COINS_SMALL_AMOUNT); break;
+            case COINS_MEDIUM: CoinManager.Instance?.AddCoins(COINS_MEDIUM_AMOUNT); break;
+            case COINS_LARGE:  CoinManager.Instance?.AddCoins(COINS_LARGE_AMOUNT); break;
             case EXTRA_TIME:
-                int uses = SaveManager.LoadInt("ExtraTimeUses", 0) + EXTRA_TIME_USES;
+                int uses = SaveManager.LoadInt("ExtraTimeUses", 0) + 3;
                 SaveManager.SaveInt("ExtraTimeUses", uses);
-                ShowReward($"获得 {EXTRA_TIME_USES} 次+30秒道具！");
                 break;
-
             case NO_ADS:
                 SaveManager.SaveInt("NoAds", 1);
                 AdManager.Instance?.SetAdsEnabled(false);
-                ShowReward("广告已永久关闭！感谢支持 ❤️");
                 break;
-
             case VIP_PACK:
                 SaveManager.SaveInt("NoAds", 1);
                 AdManager.Instance?.SetAdsEnabled(false);
-                CoinManager.Instance?.AddCoins(VIP_PACK_COINS);
-                SaveManager.SaveInt("VIPSkin", 1);
-                ShowReward($"VIP礼包已激活！去广告 + {VIP_PACK_COINS}金币 + 专属皮肤");
+                CoinManager.Instance?.AddCoins(500);
                 break;
-
             case WEEKLY_VIP:
                 SaveManager.SaveInt("WeeklyVIP", 1);
-                ShowReward("周VIP已激活！每日双倍金币 + 去广告");
                 break;
         }
+        UIManager.Instance?.ShowToast("购买成功！");
+    }
 
+#if IAP_ENABLED
+    // ─────────────────────────────────────────
+    // IDetailedStoreListener
+    // ─────────────────────────────────────────
+
+    public void OnInitialized(IStoreController ctrl, IExtensionProvider ext)
+    {
+        storeController = ctrl; extensions = ext; isInitialized = true;
+        Debug.Log("[IAP] ✅ 初始化成功");
+    }
+
+    public void OnInitializeFailed(InitializationFailureReason r) =>
+        Debug.LogWarning("[IAP] 初始化失败: " + r);
+
+    public void OnInitializeFailed(InitializationFailureReason r, string msg) =>
+        Debug.LogWarning($"[IAP] 初始化失败: {r} | {msg}");
+
+    public PurchaseProcessingResult ProcessPurchase(PurchaseEventArgs args)
+    {
+        ProcessReward(args.purchasedProduct.definition.id);
         onPurchaseSuccess?.Invoke();
         onPurchaseSuccess = null;
         return PurchaseProcessingResult.Complete;
     }
 
-    public void OnPurchaseFailed(Product product, PurchaseFailureReason reason)
+    public void OnPurchaseFailed(Product p, PurchaseFailureReason r)
     {
-        Debug.LogWarning($"[IAP] ❌ 购买失败: {product.definition.id} | {reason}");
-        onPurchaseFailed?.Invoke();
-        onPurchaseFailed = null;
+        Debug.LogWarning($"[IAP] 购买失败: {p.definition.id} | {r}");
+        onPurchaseFailed?.Invoke(); onPurchaseFailed = null;
     }
 
-    public void OnPurchaseFailed(Product product, PurchaseFailureDescription desc)
+    public void OnPurchaseFailed(Product p, PurchaseFailureDescription d)
     {
-        Debug.LogWarning($"[IAP] ❌ 购买失败详情: {product.definition.id} | {desc.reason} | {desc.message}");
-        onPurchaseFailed?.Invoke();
-        onPurchaseFailed = null;
+        Debug.LogWarning($"[IAP] 购买失败: {p.definition.id} | {d.message}");
+        onPurchaseFailed?.Invoke(); onPurchaseFailed = null;
     }
-
-    // ─────────────────────────────────────────
-    // 辅助
-    // ─────────────────────────────────────────
-
-    void RestoreNonConsumables()
-    {
-        // 检查去广告
-        var noAds = storeController.products.WithID(NO_ADS);
-        if (noAds != null && noAds.hasReceipt)
-        {
-            SaveManager.SaveInt("NoAds", 1);
-            AdManager.Instance?.SetAdsEnabled(false);
-        }
-    }
-
-    void ShowReward(string msg)
-    {
-        UIManager.Instance?.ShowToast(msg);
-        Debug.Log("[IAP] 奖励发放: " + msg);
-    }
+#endif
 }

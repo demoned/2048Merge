@@ -2,9 +2,14 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// 广告管理器 - IronSource LevelPlay SDK 9.x 适配版
-/// 支持：激励视频 / 插页广告
+/// 广告管理器 - IronSource LevelPlay 9.x
+/// ⚠️ 未导入SDK时自动进入模拟模式（编辑器可正常编译运行）
+/// 导入SDK后修改顶部 #define 即可激活真实广告
 /// </summary>
+
+// 导入IronSource SDK后，把下面这行注释取消
+// #define IRONSOURCE_ENABLED
+
 public class AdManager : MonoBehaviour
 {
     public static AdManager Instance;
@@ -26,60 +31,55 @@ public class AdManager : MonoBehaviour
 
     void Start()
     {
-#if UNITY_ANDROID || UNITY_IOS
+#if IRONSOURCE_ENABLED
         InitSDK();
+#else
+        Debug.Log("[AdManager] 模拟模式运行（SDK未导入）");
 #endif
     }
 
+#if IRONSOURCE_ENABLED
     void InitSDK()
     {
         if (testMode)
             IronSource.Agent.setMetaData("is_test_suite", "enable");
 
-        // LevelPlay 9.x 初始化方式
         IronSource.Agent.init(appKey);
 
-        // 激励视频事件（LevelPlay 9.x）
-        IronSourceRewardedVideoEvents.onAdRewardedEvent      += OnRewarded;
-        IronSourceRewardedVideoEvents.onAdShowFailedEvent    += OnRewardFailed;
+        // 激励视频回调
+        IronSourceRewardedVideoEvents.onAdRewardedEvent   += OnRewarded;
+        IronSourceRewardedVideoEvents.onAdShowFailedEvent += OnRewardFailed;
 
-        // 插页广告事件
-        IronSourceInterstitialEvents.onAdClosedEvent         += OnInterstitialClosed;
-        IronSourceInterstitialEvents.onAdLoadFailedEvent     += OnInterstitialFailed;
+        // 插页广告回调
+        IronSourceInterstitialEvents.onAdClosedEvent      += OnInterstitialClosed;
+        IronSourceInterstitialEvents.onAdLoadFailedEvent  += OnInterstitialLoadFailed;
 
-        // 预加载插页广告
         IronSource.Agent.loadInterstitial();
-
-        Debug.Log("[AdManager] LevelPlay 9.x 初始化完成 | testMode=" + testMode);
+        Debug.Log("[AdManager] LevelPlay 9.x 初始化完成");
     }
+#endif
 
     // ─────────────────────────────────────────
-    // 公开接口
+    // 公开接口（有无SDK都可调用）
     // ─────────────────────────────────────────
 
-    /// <summary>
-    /// 显示激励视频
-    /// placement: "revive" / "win_double"
-    /// </summary>
     public void ShowRewardedAd(string placement, Action onSuccess = null)
     {
         pendingRewardCallback = onSuccess;
 
-#if UNITY_ANDROID || UNITY_IOS
+#if IRONSOURCE_ENABLED
         if (IronSource.Agent.isRewardedVideoAvailable())
         {
             IronSource.Agent.showRewardedVideo(placement);
             return;
         }
 #endif
-        // 编辑器/广告不可用直接给奖励（测试用）
-        Debug.LogWarning("[AdManager] 广告不可用，直接给奖励（测试模式）");
+        // 模拟模式/广告不可用：直接给奖励
+        Debug.Log("[AdManager] 模拟奖励触发: " + placement);
         onSuccess?.Invoke();
+        pendingRewardCallback = null;
     }
 
-    /// <summary>
-    /// 尝试显示插页广告（每3局触发一次）
-    /// </summary>
     public void TryShowInterstitial()
     {
         if (!AreAdsEnabled()) return;
@@ -88,59 +88,58 @@ public class AdManager : MonoBehaviour
         SaveManager.SaveInt("PlayCount", count);
         if (count % 3 != 0) return;
 
-#if UNITY_ANDROID || UNITY_IOS
+#if IRONSOURCE_ENABLED
         if (IronSource.Agent.isInterstitialReady())
             IronSource.Agent.showInterstitial();
         else
             IronSource.Agent.loadInterstitial();
+#else
+        Debug.Log("[AdManager] 模拟插页广告");
 #endif
     }
 
-    /// <summary>去广告购买后调用</summary>
     public void SetAdsEnabled(bool enabled)
     {
         SaveManager.SaveInt("AdsEnabled", enabled ? 1 : 0);
-        Debug.Log("[AdManager] 广告: " + (enabled ? "开启" : "已关闭"));
     }
 
     public bool AreAdsEnabled()
     {
         if (SaveManager.LoadInt("NoAds", 0) == 1) return false;
-        if (IAPManager.Instance?.IsVipActive() == true) return false;
         return true;
     }
 
     // ─────────────────────────────────────────
-    // SDK 回调
+    // SDK 回调（仅SDK存在时编译）
     // ─────────────────────────────────────────
 
+#if IRONSOURCE_ENABLED
     void OnRewarded(IronSourcePlacement placement, IronSourceAdInfo info)
     {
-        Debug.Log("[AdManager] 激励视频完成: " + placement.getPlacementName());
+        Debug.Log("[AdManager] 激励视频完成");
         pendingRewardCallback?.Invoke();
         pendingRewardCallback = null;
     }
 
     void OnRewardFailed(IronSourceAdInfo info, IronSourceError error)
     {
-        Debug.LogWarning("[AdManager] 激励视频失败: " + error.getDescription());
+        Debug.LogWarning("[AdManager] 激励失败: " + error.getDescription());
         pendingRewardCallback = null;
     }
 
     void OnInterstitialClosed(IronSourceAdInfo info)
     {
-        IronSource.Agent.loadInterstitial(); // 预加载下一个
+        IronSource.Agent.loadInterstitial();
     }
 
-    void OnInterstitialFailed(IronSourceError error)
+    void OnInterstitialLoadFailed(IronSourceError error)
     {
-        Debug.LogWarning("[AdManager] 插页广告加载失败: " + error.getDescription());
+        Debug.LogWarning("[AdManager] 插页加载失败: " + error.getDescription());
     }
 
     void OnApplicationPause(bool paused)
     {
-#if UNITY_ANDROID || UNITY_IOS
         IronSource.Agent.onApplicationPause(paused);
-#endif
     }
+#endif
 }
