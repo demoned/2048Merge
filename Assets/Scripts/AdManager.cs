@@ -1,142 +1,129 @@
+using System;
 using UnityEngine;
-using IronSourceSDK; // IronSource SDK 命名空间
 
 /// <summary>
-/// 广告管理器 - IronSource集成
-/// 变现点：
-/// 1. 失败后复活（激励视频）
-/// 2. 胜利双倍金币（激励视频）
-/// 3. 每关结束（插页广告）
+/// 广告管理器 - IronSource封装
+/// 支持：激励视频 / 插页广告
 /// </summary>
 public class AdManager : MonoBehaviour
 {
     public static AdManager Instance;
 
-    [Header("IronSource App Key")]
-    [Tooltip("从IronSource后台获取App Key")]
+    [Header("IronSource配置")]
+    [Tooltip("从IronSource后台复制App Key填这里")]
     public string appKey = "YOUR_IRONSOURCE_APP_KEY";
 
-    // 广告回调事件
-    private System.Action onRewardEarned;
-    private string currentAdPlacement;
+    [Header("测试模式（上线前改为false）")]
+    public bool testMode = true;
+
+    private Action pendingRewardCallback;
+    private string pendingPlacement;
 
     void Awake()
     {
-        if (Instance == null)
-        {
-            Instance = this;
-            DontDestroyOnLoad(gameObject);
-        }
-        else
-        {
-            Destroy(gameObject);
-        }
+        if (Instance == null) { Instance = this; DontDestroyOnLoad(gameObject); }
+        else { Destroy(gameObject); return; }
     }
 
     void Start()
     {
+#if UNITY_ANDROID || UNITY_IOS
         InitIronSource();
+#endif
     }
 
-    /// <summary>
-    /// 初始化IronSource SDK
-    /// </summary>
     void InitIronSource()
     {
-        // 初始化SDK（必须在最前调用）
-        IronSource.Agent.init(appKey, IronSourceAdUnits.REWARDED_VIDEO, IronSourceAdUnits.INTERSTITIAL);
+        if (testMode)
+        {
+            // 测试设备ID（从Logcat/Xcode日志获取）
+            IronSource.Agent.setMetaData("is_test_suite", "enable");
+        }
 
-        // 注册激励视频回调
-        IronSourceRewardedVideoEvents.onAdRewardedEvent += OnRewardEarned;
-        IronSourceRewardedVideoEvents.onAdShowFailedEvent += OnRewardShowFailed;
+        IronSource.Agent.init(appKey,
+            IronSourceAdUnits.REWARDED_VIDEO,
+            IronSourceAdUnits.INTERSTITIAL);
 
-        // 注册插页广告回调
-        IronSourceInterstitialEvents.onAdReadyEvent += OnInterstitialReady;
-        IronSourceInterstitialEvents.onAdShowSucceededEvent += OnInterstitialShown;
+        // 激励视频事件
+        IronSourceRewardedVideoEvents.onAdRewardedEvent += OnRewarded;
+        IronSourceRewardedVideoEvents.onAdShowFailedEvent += OnRewardFailed;
+
+        // 插页广告事件
+        IronSourceInterstitialEvents.onAdClosedEvent += OnInterstitialClosed;
 
         // 预加载插页广告
         IronSource.Agent.loadInterstitial();
 
-        Debug.Log("[AdManager] IronSource初始化完成");
+        Debug.Log("[AdManager] IronSource初始化完成 | testMode=" + testMode);
     }
 
     /// <summary>
-    /// 显示激励视频广告
-    /// placement: "revive" = 复活, "win_double" = 胜利双倍
+    /// 显示激励视频
+    /// placement: "revive" / "win_double"
+    /// onSuccess: 用户看完广告后回调
     /// </summary>
-    public void ShowRewardedAd(string placement, System.Action onSuccess = null)
+    public void ShowRewardedAd(string placement, Action onSuccess = null)
     {
-        currentAdPlacement = placement;
-        onRewardEarned = onSuccess;
+        pendingPlacement = placement;
+        pendingRewardCallback = onSuccess;
 
+#if UNITY_ANDROID || UNITY_IOS
         if (IronSource.Agent.isRewardedVideoAvailable())
         {
             IronSource.Agent.showRewardedVideo(placement);
+            return;
         }
-        else
-        {
-            Debug.LogWarning("[AdManager] 激励视频暂不可用，跳过广告直接给奖励（测试模式）");
-            // 开发测试期间直接给奖励
-            onRewardEarned?.Invoke();
-        }
+#endif
+        // 编辑器/广告不可用时直接给奖励（方便测试）
+        Debug.LogWarning("[AdManager] 广告不可用，直接给奖励（测试模式）");
+        onSuccess?.Invoke();
     }
 
     /// <summary>
-    /// 显示插页广告（关卡结束时调用）
+    /// 显示插页广告（关卡结束时调用，每3关触发一次）
     /// </summary>
-    public void ShowInterstitialAd()
+    public void TryShowInterstitial()
     {
+        int playCount = SaveManager.LoadInt("PlayCount", 0) + 1;
+        SaveManager.SaveInt("PlayCount", playCount);
+
+        if (playCount % 3 != 0) return; // 每3局一次
+
+#if UNITY_ANDROID || UNITY_IOS
         if (IronSource.Agent.isInterstitialReady())
-        {
             IronSource.Agent.showInterstitial();
-        }
         else
-        {
-            // 重新加载
             IronSource.Agent.loadInterstitial();
-            Debug.Log("[AdManager] 插页广告未就绪，重新加载中");
-        }
+#endif
     }
 
-    // ---- 广告回调 ----
+    // ─────────────────────────────────────────
+    // 广告回调
+    // ─────────────────────────────────────────
 
-    void OnRewardEarned(IronSourcePlacement placement, IronSourceAdInfo adInfo)
+    void OnRewarded(IronSourcePlacement placement, IronSourceAdInfo info)
     {
-        Debug.Log($"[AdManager] 激励视频奖励已获得: {placement.getPlacementName()}");
-
-        if (currentAdPlacement == "revive")
-        {
-            // 触发复活逻辑
-            FindObjectOfType<GameBoard>()?.StartGame();
-        }
-        else if (currentAdPlacement == "win_double")
-        {
-            // 触发双倍奖励
-            ScoreManager.Instance?.DoubleScore();
-        }
-
-        onRewardEarned?.Invoke();
+        Debug.Log("[AdManager] 激励视频完成: " + placement.getPlacementName());
+        pendingRewardCallback?.Invoke();
+        pendingRewardCallback = null;
     }
 
-    void OnRewardShowFailed(IronSourceAdInfo adInfo, IronSourceError error)
+    void OnRewardFailed(IronSourceAdInfo info, IronSourceError error)
     {
-        Debug.LogError($"[AdManager] 激励视频展示失败: {error.getDescription()}");
+        Debug.LogWarning("[AdManager] 激励视频失败: " + error.getDescription());
+        // 失败时不给奖励，让玩家重试
     }
 
-    void OnInterstitialReady(IronSourceAdInfo adInfo)
+    void OnInterstitialClosed(IronSourceAdInfo info)
     {
-        Debug.Log("[AdManager] 插页广告已就绪");
-    }
-
-    void OnInterstitialShown(IronSourceAdInfo adInfo)
-    {
-        Debug.Log("[AdManager] 插页广告展示完成");
-        // 预加载下一个
+        // 插页关闭后预加载下一个
         IronSource.Agent.loadInterstitial();
     }
 
-    void OnApplicationPause(bool isPaused)
+    void OnApplicationPause(bool paused)
     {
-        IronSource.Agent.onApplicationPause(isPaused);
+#if UNITY_ANDROID || UNITY_IOS
+        IronSource.Agent.onApplicationPause(paused);
+#endif
     }
 }

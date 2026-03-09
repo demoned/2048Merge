@@ -1,63 +1,44 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 /// <summary>
-/// 手机触摸滑动输入处理
-/// 支持：上下左右滑动 + 最小滑动距离过滤（避免误触）
+/// 手机触摸滑动 + PC鼠标拖拽双模式
 /// </summary>
 public class SwipeInput : MonoBehaviour
 {
-    [Header("Settings")]
-    public float minSwipeDistance = 50f; // 最小滑动距离(px)
-    public GameBoard gameBoard;
+    public float minSwipeDistance = 40f;
 
-    private Vector2 touchStart;
-    private bool isSwiping = false;
+    private Vector2 startPos;
+    private bool dragging;
 
     void Update()
     {
-        // PC测试用键盘（GameBoard已处理）
-        // 移动端触摸滑动
-        HandleTouchInput();
+        if (GameManager.Instance?.CurrentState != GameManager.GameState.Playing) return;
+
+        // 触摸
+        if (Input.touchCount > 0)
+        {
+            Touch t = Input.GetTouch(0);
+            if (t.phase == TouchPhase.Began) { startPos = t.position; dragging = true; }
+            if (t.phase == TouchPhase.Ended && dragging) { ProcessSwipe(t.position - startPos); dragging = false; }
+        }
+
+        // PC鼠标模拟
+        if (Input.GetMouseButtonDown(0)) { startPos = Input.mousePosition; dragging = true; }
+        if (Input.GetMouseButtonUp(0) && dragging)
+        {
+            ProcessSwipe((Vector2)Input.mousePosition - startPos);
+            dragging = false;
+        }
     }
 
-    void HandleTouchInput()
+    void ProcessSwipe(Vector2 delta)
     {
-        if (Input.touchCount == 0) return;
+        if (delta.magnitude < minSwipeDistance) return;
 
-        Touch touch = Input.GetTouch(0);
-
-        switch (touch.phase)
-        {
-            case TouchPhase.Began:
-                touchStart = touch.position;
-                isSwiping = true;
-                break;
-
-            case TouchPhase.Ended:
-                if (!isSwiping) return;
-                isSwiping = false;
-
-                Vector2 delta = touch.position - touchStart;
-
-                // 过滤太短的滑动
-                if (delta.magnitude < minSwipeDistance) return;
-
-                // 判断主方向
-                if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
-                {
-                    // 横向滑动
-                    gameBoard?.Move(delta.x > 0 ? Vector2Int.right : Vector2Int.left);
-                }
-                else
-                {
-                    // 纵向滑动（注意Unity Y轴方向）
-                    gameBoard?.Move(delta.y > 0 ? Vector2Int.up : Vector2Int.down);
-                }
-                break;
-
-            case TouchPhase.Canceled:
-                isSwiping = false;
-                break;
-        }
+        if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+            GameBoard.Instance?.TryMove(delta.x > 0 ? 1 : -1, 0);
+        else
+            GameBoard.Instance?.TryMove(0, delta.y > 0 ? 1 : -1);
     }
 }
