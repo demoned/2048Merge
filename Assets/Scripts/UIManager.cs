@@ -136,4 +136,26 @@ public class UIManager : MonoBehaviour
             GameManager.Instance?.ReviveGame();
         });
     }
+
+    /// <summary>更新金币显示</summary>
+    public void UpdateCoins(int coins)
+    {
+        // 如果有金币UI组件，在这里更新
+        Debug.Log("[UI] 金币更新: " + coins);
+    }
+
+    /// <summary>显示Toast提示（短暂弹出消息）</summary>
+    public void ShowToast(string msg)
+    {
+        Debug.Log("[Toast] " + msg);
+        // 简单实现：用协程显示临时文字
+        StartCoroutine(ToastCoroutine(msg));
+    }
+
+    System.Collections.IEnumerator ToastCoroutine(string msg)
+    {
+        // 如果有Toast对象可在这里显示
+        // 简化版：只打Log，上线前可替换为UI弹窗
+        yield return new UnityEngine.WaitForSeconds(2f);
+    }
 }

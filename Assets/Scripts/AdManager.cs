@@ -120,6 +120,21 @@ public class AdManager : MonoBehaviour
         IronSource.Agent.loadInterstitial();
     }
 
+    /// <summary>去广告购买后调用，关闭所有广告</summary>
+    public void SetAdsEnabled(bool enabled)
+    {
+        SaveManager.SaveInt("AdsEnabled", enabled ? 1 : 0);
+        Debug.Log("[AdManager] 广告状态: " + (enabled ? "开启" : "关闭（已购买去广告）"));
+    }
+
+    public bool AreAdsEnabled()
+    {
+        // 购买去广告或周VIP时禁用广告
+        if (SaveManager.LoadInt("NoAds", 0) == 1) return false;
+        if (IAPManager.Instance?.IsVipActive() == true) return false;
+        return true;
+    }
+
     void OnApplicationPause(bool paused)
     {
 #if UNITY_ANDROID || UNITY_IOS
