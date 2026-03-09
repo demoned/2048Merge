@@ -327,6 +327,4 @@ public class AutoSetup : EditorWindow
     static Vector4 AnchorFull() => new Vector4(0, 0, 1, 1);
     static Vector2[] AnchorCenter(float x, float y, float w, float h)
         => new Vector2[] { new Vector2(x, y), new Vector2(w, h) };
-    static Vector4 AnchorCenter(float x, float y, float w, float h)  // 重载给Image用
-        => new Vector4(x, y, w, h); // 实际用anchoredPos+size传入，这里只是占位
 }
